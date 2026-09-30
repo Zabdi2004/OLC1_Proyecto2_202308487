@@ -401,6 +401,8 @@ export class FunctionDeclInstruction extends Instruction {
             throw err;
         }
 
+        this.declarationEnvironment = environment;
+
         const sym = new Symbol(this.name, 'función', this.returnType, environment.name, this, this.line, this.column);
         environment.define(this.name, sym);
         return ExecutionResult.normal();
@@ -426,8 +428,8 @@ export class FunctionDeclInstruction extends Instruction {
         }
 
         try {
-            // El nuevo entorno local de la función se enlaza al entorno global / donde fue declarada
-            const funcEnv = new Environment(callingEnvironment, this.name);
+            // El nuevo entorno local de la función se enlaza al entorno donde fue declarada (lexical scope)
+            const funcEnv = new Environment(this.declarationEnvironment || callingEnvironment, this.name);
 
             // Registrar parámetros en el entorno
             for (let i = 0; i < this.params.length; i++) {
