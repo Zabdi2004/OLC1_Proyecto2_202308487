@@ -5,11 +5,14 @@ import { InfraState } from '../infrastructure/InfraState.js';
 import { CompilerError } from '../errors/CompilerError.js';
 import { ErrorType } from '../errors/ErrorType.js';
 import { AstGraphvizReport } from '../reports/AstGraphvizReport.js';
+import { SemanticAnalyzer } from '../semantic/SemanticAnalyzer.js';
 import { resetInstructionCounter } from '../ast/instructions/InstructionNodes.js';
+import { Type } from '../environment/Type.js';
 
 export class Interpreter {
     constructor() {
         this.dotGenerator = new AstGraphvizReport();
+        this.semanticAnalyzer = new SemanticAnalyzer();
     }
 
     /**
@@ -37,7 +40,7 @@ export class Interpreter {
         // Generar DOT del AST (incluso si hubo errores parciales recuperados)
         const astDot = this.dotGenerator.generateDot(ast);
 
-        // Si hay errores léxicos o sintácticos críticos, no ejecutamos
+        // Si hay errores léxicos o sintácticos críticos, no analizamos ni ejecutamos
         if (allErrors.length > 0) {
             return {
                 success: false,
@@ -56,13 +59,51 @@ export class Interpreter {
                     line: t.line,
                     column: t.column
                 })),
-                symbols: globalEnv.getAllHistorySymbols().map(s => s.toJSON()),
+                symbols: [],
                 infrastructure: infra.toJSON(),
                 astDot
             };
         }
 
-        // 3. EJECUCIÓN (PATRÓN INTERPRETER)
+        // 3. ANÁLISIS SEMÁNTICO (antes de ejecutar)
+        const { errors: semErrors, symbols: semanticSymbols } = this.semanticAnalyzer.analyze(ast);
+        allErrors.push(...semErrors);
+
+        if (allErrors.length > 0) {
+            return {
+                success: false,
+                console: infra.consoleOutput,
+                bitacora: infra.bitacora,
+                errors: allErrors.map(e => ({
+                    type: e.type,
+                    code: e.code,
+                    description: e.description,
+                    line: e.line,
+                    column: e.column
+                })),
+                tokens: tokens.map((t, idx) => ({
+                    id: idx + 1,
+                    lexeme: t.lexeme,
+                    type: t.type,
+                    line: t.line,
+                    column: t.column
+                })),
+                symbols: semanticSymbols.map((s, idx) => ({
+                    id: idx + 1,
+                    name: s.name,
+                    category: s.category,
+                    type: s.type instanceof Type ? s.type.toString() : String(s.type),
+                    scope: s.scope,
+                    value: null,
+                    line: s.line,
+                    column: s.column
+                })),
+                infrastructure: infra.toJSON(),
+                astDot
+            };
+        }
+
+        // 4. EJECUCIÓN (PATRÓN INTERPRETER)
         try {
             // Paso A: Registrar recursos, funciones, tareas y variables globales
             let mainTask = null;

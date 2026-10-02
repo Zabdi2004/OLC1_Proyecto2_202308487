@@ -6,6 +6,7 @@ import { Lexer } from './src/lexer/Lexer.js';
 import { Parser } from './src/parser/Parser.js';
 import { TokenType } from './src/lexer/TokenType.js';
 import { AstGraphvizReport } from './src/reports/AstGraphvizReport.js';
+import { SemanticAnalyzer } from './src/semantic/SemanticAnalyzer.js';
 
 const testGroups = [];
 let currentGroup = null;
@@ -583,6 +584,317 @@ main {
 }`;
         const { ast, errors } = parseSource(source);
         assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+});
+
+describe("Semantic", () => {
+    function analyzeSource(source) {
+        const { ast } = parseSource(source);
+        const analyzer = new SemanticAnalyzer();
+        return analyzer.analyze(ast);
+    }
+
+    test('tipos básicos válidos', () => {
+        const source = `int x = 5;
+float y = 3.14;
+string s = "hola";
+bool b = true;
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+
+    test('int assignable a float', () => {
+        const source = `float f = 10;
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0);
+    });
+
+    test('tipo incompatible en declaración', () => {
+        const source = `int x = "hola";
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar error de tipo');
+    });
+
+    test('asignación de tipo incompatible', () => {
+        const source = `int x = 5;
+main {
+    x = "hola";
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar error de tipo en asignación');
+        assert(errors.some(e => e.code === 'SEM-002'));
+    });
+
+    test('arreglo heterogéneo', () => {
+        const source = `string[] x = ["a", 5];
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar arreglo heterogéneo');
+    });
+
+    test('asignación de índice incompatible', () => {
+        const source = `string[] x = ["a"];
+main {
+    x[0] = 5;
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar asignación de índice incompatible');
+    });
+
+    test('propiedad no permitida en server', () => {
+        const source = `server backend {
+    cpu = 4;
+    banana = 123;
+}
+
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar propiedad no permitida');
+    });
+
+    test('propiedad válida en server', () => {
+        const source = `server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+
+    test('parametro de tipo incorrecto', () => {
+        const source = `function f(server s) bool {
+    return true;
+}
+
+main {
+    f(123);
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar argumento de tipo incorrecto');
+    });
+
+    test('retorno de tipo incompatible', () => {
+        const source = `function f() int {
+    return "hola";
+}
+
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar retorno de tipo incompatible');
+    });
+
+    test('return sin valor en función no void', () => {
+        const source = `function f() int {
+    return;
+}
+
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar return sin valor en función no void');
+    });
+
+    test('return void en función void', () => {
+        const source = `function f() void {
+    return;
+}
+
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+
+    test('break fuera de ciclo', () => {
+        const source = `main {
+    break;
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar break fuera de ciclo');
+    });
+
+    test('continue fuera de ciclo', () => {
+        const source = `main {
+    continue;
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar continue fuera de ciclo');
+    });
+
+    test('return fuera de función', () => {
+        const source = `main {
+    return 5;
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar return fuera de función');
+    });
+
+    test('break dentro de while', () => {
+        const source = `main {
+    while (true) {
+        break;
+    }
+}`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+
+    test('break dentro de for', () => {
+        const source = `main {
+    for (int i = 0; i < 10; i = i + 1) {
+        break;
+    }
+}`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+
+    test('cero main', () => {
+        const source = `int x = 5;`;
+        const { errors } = analyzeSource(source);
+        assert(errors.some(e => e.code === 'SEM-000'));
+    });
+
+    test('dos mains', () => {
+        const source = `main { print("a"); }
+main { print("b"); }`;
+        const { errors } = analyzeSource(source);
+        assert(errors.some(e => e.code === 'SEM-000'));
+    });
+
+    test('función no declarada', () => {
+        const source = `main {
+    unknown(5);
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar función no declarada');
+    });
+
+    test('native function argument count', () => {
+        const source = `main {
+    start();
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar número de argumentos incorrecto');
+    });
+
+    test('native function argument type', () => {
+        const source = `main {
+    start(123);
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar tipo de argumento incorrecto');
+    });
+
+    test('dependsOn con recursos válidos', () => {
+        const source = `database db {
+    engine = "postgresql";
+    version = "16";
+    port = 5432;
+}
+
+server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+service api {
+    port = 8080;
+    replicas = 2;
+    dependsOn = [db, backend];
+}
+
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+
+    test('propiedades de recurso: server', () => {
+        const source = `server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+main {
+    backend.status = "running";
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar asignación a propiedad de solo lectura status');
+    });
+
+    test('acceso a propiedad de recurso', () => {
+        const source = `server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+main {
+    int c = backend.cpu;
+    string os = backend.os;
+}`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+
+    test('acceso a propiedad inexistente', () => {
+        const source = `server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+main {
+    int c = backend.nonexistent;
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar propiedad inexistente');
+    });
+
+    test('doble asignación en mismo scope', () => {
+        const source = `int x = 1;
+int x = 2;
+main { print("ok"); }`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar declaración duplicada');
+    });
+
+    test('shadowing permitido', () => {
+        const source = `int x = 1;
+function test() int {
+    int x = 2;
+    return x;
+}
+main { print(test()); }`;
+        const { errors } = analyzeSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+
+    test('condiciones de if deben ser bool', () => {
+        const source = `main {
+    if (5) { print("ok"); }
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar condición no booleana en if');
+    });
+
+    test('condiciones de while deben ser bool', () => {
+        const source = `main {
+    while (5) { print("ok"); }
+}`;
+        const { errors } = analyzeSource(source);
+        assert(errors.length > 0, 'debe detectar condición no booleana en while');
     });
 });
 
