@@ -36,11 +36,12 @@ COMMENT_MULTI  ::= '/*' .*? '*/'
 ## 3. Gramática Libre de Contexto (EBNF)
 
 ```ebnf
-program ::= globalDeclaration* mainBlock? EOF
+program ::= globalDeclaration* EOF
 
 globalDeclaration ::= resourceDeclaration
                     | functionDeclaration
                     | taskDeclaration
+                    | mainDeclaration
                     | variableDeclaration
 
 resourceDeclaration ::= ('server' | 'service' | 'database') IDENTIFIER '{' propertyAssignment* '}'
@@ -54,7 +55,7 @@ parameter ::= type IDENTIFIER
 
 taskDeclaration ::= 'task' IDENTIFIER '{' statement* '}'
 
-mainBlock ::= 'main' '{' statement* '}'
+mainDeclaration ::= 'main' '{' statement* '}'
 
 statement ::= variableDeclaration
             | assignmentStatement
@@ -93,6 +94,8 @@ expressionStatement ::= expression ';'
 type ::= baseType ('[' ']')?
 baseType ::= 'int' | 'float' | 'string' | 'bool' | 'server' | 'service' | 'database'
 ```
+
+> **Regla de main:** El programa debe contener **exactamente un** bloque `main`. Cero o múltiples bloques `main` producirán un error semántico (código `SEM-000`).
 
 ---
 

@@ -210,14 +210,23 @@ export class Lexer {
             if (this.peek() === '\\') {
                 this.advance(); // consume '\'
                 const escapeChar = this.peek();
-                switch (escapeChar) {
-                    case '"': value += '"'; break;
-                    case '\\': value += '\\'; break;
-                    case 'n': value += '\n'; break;
-                    case 't': value += '\t'; break;
-                    default:
-                        value += escapeChar;
-                        break;
+                const validEscapes = new Set(['"', '\\', 'n', 't', 'r']);
+                if (!validEscapes.has(escapeChar)) {
+                    this.addError(
+                        'LEX-005',
+                        `Secuencia de escape inválida '\\${escapeChar}'`,
+                        this.line,
+                        this.column
+                    );
+                    value += escapeChar;
+                } else {
+                    switch (escapeChar) {
+                        case '"': value += '"'; break;
+                        case '\\': value += '\\'; break;
+                        case 'n': value += '\n'; break;
+                        case 't': value += '\t'; break;
+                        case 'r': value += '\r'; break;
+                    }
                 }
                 this.advance();
             } else {

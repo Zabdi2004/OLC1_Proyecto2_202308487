@@ -39,6 +39,7 @@ export class Parser {
         this.tokens = tokens;
         this.current = 0;
         this.errors = [];
+        this.mainCount = 0;
     }
 
     /**
@@ -57,6 +58,22 @@ export class Parser {
             } catch (err) {
                 this.synchronize();
             }
+        }
+
+        // Validar exactamente un main (enunciado: "El enunciado exige exactamente un main")
+        if (this.mainCount === 0) {
+            this.error(
+                { type: TokenType.EOF, lexeme: 'EOF', line: 1, column: 1 },
+                'No se encontró el bloque obligatorio main { ... }',
+                'SEM-000'
+            );
+        }
+        if (this.mainCount > 1) {
+            this.error(
+                { type: TokenType.EOF, lexeme: 'EOF', line: 1, column: 1 },
+                `Se encontraron ${this.mainCount} bloques main. Solo se permite exactamente un main.`,
+                'SEM-000'
+            );
         }
 
         return {
@@ -152,6 +169,7 @@ export class Parser {
 
     mainDeclaration() {
         const mainToken = this.previous();
+        this.mainCount++;
         this.consume(TokenType.LBRACE, `Se esperaba '{' tras 'main'`);
         const body = this.blockStatement();
         return new TaskDeclInstruction('main', body, mainToken.line, mainToken.column);
@@ -513,11 +531,11 @@ export class Parser {
         return false;
     }
 
-    consume(type, message) {
+    consume(type, message, code = 'SIN-001') {
         if (this.check(type)) return this.advance();
 
         const token = this.peek();
-        this.error(token, message);
+        this.error(token, message, code);
         throw new Error(message);
     }
 
@@ -543,11 +561,11 @@ export class Parser {
         return this.tokens[this.current - 1];
     }
 
-    error(token, message) {
+    error(token, message, code = 'SIN-001') {
         this.errors.push(
             new CompilerError(
                 ErrorType.SINTACTICO,
-                'SIN-001',
+                code,
                 message,
                 token.line || 1,
                 token.column || 1
