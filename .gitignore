@@ -1,0 +1,13 @@
+# Dependencias
+node_modules/
+package-lock.json
+
+# Builds
+dist/
+build/
+
+# IDE y Sistema
+.vscode/
+.idea/
+.DS_Store
+*.log

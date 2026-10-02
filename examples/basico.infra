@@ -1,0 +1,20 @@
+server web {
+    cpu = 2;
+    memory = 4;
+    disk = 50;
+    os = "ubuntu";
+}
+
+service frontend {
+    port = 80;
+    replicas = 1;
+}
+
+main {
+    start(web);
+    int cost = web.cpu * 10 + web.memory * 5;
+    if (cost >= 40) {
+        install(web, "nginx");
+        deploy(web, frontend);
+    }
+}

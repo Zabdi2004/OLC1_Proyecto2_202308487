@@ -1,0 +1,26 @@
+server node {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+string[] packages = ["docker", "git", "nginx"];
+
+function prepare(server s, string[] pkgs) bool {
+    int i = 0;
+    while (i < length(pkgs)) {
+        install(s, pkgs[i]);
+        i = i + 1;
+    }
+    return true;
+}
+
+task setup {
+    start(node);
+    prepare(node, packages);
+}
+
+main {
+    run setup;
+}

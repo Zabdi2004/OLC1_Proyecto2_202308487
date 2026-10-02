@@ -1,0 +1,44 @@
+database db {
+    engine = "postgresql";
+    version = "16";
+    port = 5432;
+}
+
+server backend {
+    cpu = 8;
+    memory = 16;
+    disk = 200;
+    os = "ubuntu";
+}
+
+service api {
+    port = 8080;
+    replicas = 2;
+    dependsOn = [db];
+}
+
+function retryStart(server s, int n) bool {
+    if (n <= 0) {
+        return false;
+    }
+    if (start(s)) {
+        return true;
+    }
+    return retryStart(s, n - 1);
+}
+
+task production {
+    start(db);
+    retryStart(backend, 3);
+    if (backend.status == "running" && db.status == "running") {
+        install(backend, "docker");
+        deploy(backend, api);
+        for (int i = 2; i <= 5; i = i + 1) {
+            scale(api, i);
+        }
+    }
+}
+
+main {
+    run production;
+}

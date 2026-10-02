@@ -1,0 +1,46 @@
+// Archivo de pruebas con casos de error obligatorios para verificar el reporte de errores
+
+server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+database db {
+    engine = "postgresql";
+    version = "16";
+    port = 5432;
+}
+
+service api {
+    port = 8080;
+    replicas = 2;
+    dependsOn = [db];
+}
+
+main {
+    // 1. Error léxico: caracter no reconocido
+    // int x = 10 @ 2;
+
+    // 2. Variable no declarada
+    // x = 5;
+
+    // 3. Tipo incompatible
+    // int x = "hola";
+
+    // 4. Propiedad inexistente
+    // print(backend.coresX);
+
+    // 5. Propiedad de solo lectura
+    // backend.status = "running";
+
+    // 6. Dependencia detenida (db no ha sido iniciada antes del deploy)
+    deploy(backend, api);
+
+    // 7. Break fuera de ciclo
+    // break;
+
+    // 8. Firma incorrecta
+    // scale(api);
+}
