@@ -5,6 +5,7 @@
 import { Lexer } from './src/lexer/Lexer.js';
 import { Parser } from './src/parser/Parser.js';
 import { TokenType } from './src/lexer/TokenType.js';
+import { AstGraphvizReport } from './src/reports/AstGraphvizReport.js';
 
 const testGroups = [];
 let currentGroup = null;
@@ -400,8 +401,190 @@ main { print("ok"); }`;
 });
 
 // ============================================
-// Runner
+// AST Tests
 // ============================================
+
+function parseSource(source) {
+    const lexer = new Lexer(source);
+    const { tokens } = lexer.scanTokens();
+    const parser = new Parser(tokens);
+    return parser.parse();
+}
+
+describe("AST", () => {
+    test('AST contiene todos los tipos de nodo', () => {
+        const source = `server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+string[] packages = ["docker", "git"];
+
+function canDeploy(server s, int minCpu) bool {
+    return s.cpu >= minCpu;
+}
+
+task setup {
+    start(backend);
+    deploy(backend, api);
+}
+
+main {
+    run setup;
+    int x = 10;
+    x = x + 5;
+    string p = packages[0];
+    if (x >= 15) {
+        int y = 0;
+    }
+    while (x > 0) {
+        x = x - 1;
+        continue;
+    }
+    for (int i = 0; i < 5; i = i + 1) {
+        break;
+    }
+    return;
+}`;
+        const { ast, errors } = parseSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+
+        function collectNodes(node, found) {
+            if (!node || typeof node !== 'object') return;
+            if (Array.isArray(node)) {
+                node.forEach(n => collectNodes(n, found));
+                return;
+            }
+            if (node.constructor && node.constructor.name) {
+                found.add(node.constructor.name);
+            }
+            for (const key of Object.keys(node)) {
+                const val = node[key];
+                if (val && typeof val === 'object') {
+                    if (Array.isArray(val)) {
+                        val.forEach(v => collectNodes(v, found));
+                    } else if (val.constructor && val.constructor.name !== node.constructor.name) {
+                        collectNodes(val, found);
+                    }
+                }
+            }
+        }
+
+        const found = new Set();
+        collectNodes(ast, found);
+
+        assert(found.has('VarDeclInstruction'), 'debe contener VarDeclInstruction');
+        assert(found.has('AssignmentInstruction'), 'debe contener AssignmentInstruction');
+        assert(found.has('IfInstruction'), 'debe contener IfInstruction');
+        assert(found.has('WhileInstruction'), 'debe contener WhileInstruction');
+        assert(found.has('ForInstruction'), 'debe contener ForInstruction');
+        assert(found.has('ReturnInstruction'), 'debe contener ReturnInstruction');
+        assert(found.has('BreakInstruction'), 'debe contener BreakInstruction');
+        assert(found.has('ContinueInstruction'), 'debe contener ContinueInstruction');
+        assert(found.has('FunctionDeclInstruction'), 'debe contener FunctionDeclInstruction');
+        assert(found.has('TaskDeclInstruction'), 'debe contener TaskDeclInstruction');
+        assert(found.has('RunInstruction'), 'debe contener RunInstruction');
+        assert(found.has('ResourceDeclInstruction'), 'debe contener ResourceDeclInstruction');
+        assert(found.has('ArrayExpr'), 'debe contener ArrayExpr');
+        assert(found.has('PropertyAccessExpr'), 'debe contener PropertyAccessExpr');
+        assert(found.has('IndexExpr'), 'should contain IndexExpr');
+        assert(found.has('CallExpr'), 'debe contener CallExpr');
+        assert(found.has('BinaryExpr'), 'debe contener BinaryExpr');
+        assert(found.has('IdentifierExpr'), 'debe contener IdentifierExpr');
+        assert(found.has('LiteralExpr'), 'debe contener LiteralExpr');
+    });
+
+    test('AST Graphviz genera DOT válido', () => {
+        const source = `server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+function add(int a, int b) int {
+    return a + b;
+}
+
+main {
+    int x = add(1, 2);
+    if (x > 0) {
+        print("positive");
+    }
+}`;
+        const { ast, errors } = parseSource(source);
+        assertEqual(errors.length, 0);
+
+        const generator = new AstGraphvizReport();
+        const dot = generator.generateDot(ast);
+        assert(dot.includes('digraph AST {'), 'debe contener encabezado digraph');
+        assert(dot.includes('Program'), 'debe contener nodo root Program');
+        assert(dot.includes('ResourceDecl'), 'debe contener nodo ResourceDecl');
+        assert(dot.includes('FuncDecl'), 'debe contener nodo FuncDecl');
+        assert(dot.includes('VarDecl'), 'debe contener nodo VarDecl');
+        assert(dot.includes('If'), 'debe contener nodo If');
+        assert(dot.includes('Call'), 'debe contener nodo Call');
+        assert(dot.includes('}'), 'debe cerrar el digraph');
+    });
+
+    test('AST Graphviz incluye todos los nodos', () => {
+        const source = `main {
+    int x = 0;
+    while (x < 10) {
+        x = x + 1;
+        if (x == 5) {
+            break;
+        }
+        continue;
+    }
+    for (int i = 0; i < 3; i = i + 1) {
+        return;
+    }
+}`;
+        const { ast, errors } = parseSource(source);
+        assertEqual(errors.length, 0);
+
+        const generator = new AstGraphvizReport();
+        const dot = generator.generateDot(ast);
+        assert(dot.includes('While'), 'debe contener While');
+        assert(dot.includes('For'), 'debe contener For');
+        assert(dot.includes('Return'), 'debe contener Return');
+        assert(dot.includes('Break'), 'debe contener Break');
+        assert(dot.includes('Continue'), 'debe contener Continue');
+    });
+
+    test('Literal expressions en AST', () => {
+        const source = `main {
+    int a = 10;
+    float b = 2.5;
+    string c = "hello";
+    bool d = true;
+}`;
+        const { ast, errors } = parseSource(source);
+        assertEqual(errors.length, 0);
+        assert(ast.length > 0);
+    });
+
+    test('PropertyAccess y IndexExpr en AST', () => {
+        const source = `server backend {
+    cpu = 4;
+    memory = 8;
+    disk = 100;
+    os = "ubuntu";
+}
+
+string[] pkgs = ["a", "b"];
+
+main {
+    int c = backend.cpu;
+    string first = pkgs[0];
+}`;
+        const { ast, errors } = parseSource(source);
+        assertEqual(errors.length, 0, errors.map(e => e.description).join('; '));
+    });
+});
 
 console.log('========================================');
 console.log('  AutoInfra Test Suite');

@@ -118,6 +118,26 @@ export class AstGraphvizReport {
                 break;
             }
 
+            case 'ReturnInstruction': {
+                if (node.valueExpr) {
+                    const valId = this.traverse(node.valueExpr);
+                    this.dotLines.push(`  ${id} -> ${valId} [label="value"];`);
+                }
+                break;
+            }
+
+            case 'RunInstruction': {
+                const taskId = `node_${this.nodeCounter++}`;
+                this.dotLines.push(`  ${taskId} [label="task: ${node.taskName}", fillcolor="#0f766e"];`);
+                this.dotLines.push(`  ${id} -> ${taskId};`);
+                break;
+            }
+
+            case 'BreakInstruction':
+            case 'ContinueInstruction': {
+                break;
+            }
+
             case 'BlockInstruction': {
                 for (const stmt of node.statements) {
                     const childId = this.traverse(stmt);
