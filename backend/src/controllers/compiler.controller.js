@@ -17,9 +17,14 @@ export const executeCode = (req, res) => {
             return res.status(400).json({ success: false, error: 'Campo "source" es requerido en la solicitud' });
         }
 
+        if (typeof source !== 'string') {
+            return res.status(400).json({ success: false, error: 'Campo "source" debe ser un string' });
+        }
+
         const result = interpreter.execute(source);
         return res.status(200).json(result);
     } catch (err) {
+        console.error('Error en executeCode:', err);
         return res.status(500).json({ success: false, error: err.message });
     }
 };
@@ -29,6 +34,10 @@ export const analyzeCode = (req, res) => {
         const { source } = req.body;
         if (source === undefined || source === null) {
             return res.status(400).json({ success: false, error: 'Campo "source" es requerido' });
+        }
+
+        if (typeof source !== 'string') {
+            return res.status(400).json({ success: false, error: 'Campo "source" debe ser un string' });
         }
 
         const lexer = new Lexer(source);
