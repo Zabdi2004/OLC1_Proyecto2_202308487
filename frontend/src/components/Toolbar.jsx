@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Play, FilePlus, FolderOpen, Save, Trash2, Server, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Play, FilePlus, FolderOpen, Save, SaveAs, Trash2, Server, CheckCircle2, AlertCircle } from 'lucide-react';
 import { PRESETS } from '../examples/presets';
 
 export const Toolbar = ({
@@ -7,10 +7,12 @@ export const Toolbar = ({
     onNewFile,
     onOpenFile,
     onSaveFile,
+    onSaveAsFile,
     onClear,
     onSelectPreset,
     loading,
-    backendStatus
+    backendStatus,
+    fileName
 }) => {
     const fileInputRef = useRef(null);
 
@@ -95,6 +97,11 @@ export const Toolbar = ({
                 <button className="btn" onClick={onSaveFile} title="Guardar archivo">
                     <Save size={16} />
                     <span>Guardar</span>
+                </button>
+
+                <button className="btn" onClick={onSaveAsFile} title="Guardar como... (nuevo nombre)">
+                    <SaveAs size={16} />
+                    <span>Guardar como</span>
                 </button>
 
                 <button className="btn btn-danger" onClick={onClear} title="Limpiar ejecución y reportes">

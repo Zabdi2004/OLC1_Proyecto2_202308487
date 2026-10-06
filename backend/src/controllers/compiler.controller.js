@@ -2,9 +2,12 @@ import { Interpreter } from '../interpreter/Interpreter.js';
 import { Lexer } from '../lexer/Lexer.js';
 import { Parser } from '../parser/Parser.js';
 import { AstGraphvizReport } from '../reports/AstGraphvizReport.js';
+import { SemanticAnalyzer } from '../semantic/SemanticAnalyzer.js';
+import { Type } from '../environment/Type.js';
 
 const interpreter = new Interpreter();
 const dotGenerator = new AstGraphvizReport();
+const semanticAnalyzer = new SemanticAnalyzer();
 
 export const healthCheck = (req, res) => {
     return res.status(200).json({ status: 'ok', message: 'AutoInfra Backend API está funcionando correctamente.' });
@@ -40,24 +43,29 @@ export const analyzeCode = (req, res) => {
             return res.status(400).json({ success: false, error: 'Campo "source" debe ser un string' });
         }
 
+        // 1. Lexer
         const lexer = new Lexer(source);
         const { tokens, errors: lexErrors } = lexer.scanTokens();
 
+        // 2. Parser
         const parser = new Parser(tokens);
         const { ast, errors: parseErrors } = parser.parse();
 
-        const allErrors = [...lexErrors, ...parseErrors];
+        // 3. AST
         const astDot = dotGenerator.generateDot(ast);
+
+        // 4. SemanticAnalyzer (NO ejecuta, NO modifica InfraState)
+        const { errors: semErrors, symbols } = semanticAnalyzer.analyze(ast);
+
+        const allErrors = [
+            ...lexErrors.map(e => ({ type: e.type, code: e.code, description: e.description, line: e.line, column: e.column })),
+            ...parseErrors.map(e => ({ type: e.type, code: e.code, description: e.description, line: e.line, column: e.column })),
+            ...semErrors.map(e => ({ type: e.type, code: e.code, description: e.description, line: e.line, column: e.column }))
+        ];
 
         return res.status(200).json({
             success: allErrors.length === 0,
-            errors: allErrors.map(e => ({
-                type: e.type,
-                code: e.code,
-                description: e.description,
-                line: e.line,
-                column: e.column
-            })),
+            errors: allErrors,
             tokens: tokens.map((t, idx) => ({
                 id: idx + 1,
                 lexeme: t.lexeme,
@@ -65,9 +73,20 @@ export const analyzeCode = (req, res) => {
                 line: t.line,
                 column: t.column
             })),
+            symbols: symbols.map((s, idx) => ({
+                id: idx + 1,
+                name: s.name,
+                category: s.category,
+                type: s.type instanceof Type ? s.type.toString() : String(s.type),
+                scope: s.scope,
+                value: null,
+                line: s.line,
+                column: s.column
+            })),
             astDot
         });
     } catch (err) {
+        console.error('Error en analyzeCode:', err);
         return res.status(500).json({ success: false, error: err.message });
     }
 };

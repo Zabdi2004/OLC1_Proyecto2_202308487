@@ -113,6 +113,23 @@ export function App() {
         URL.revokeObjectURL(url);
     };
 
+    const handleSaveAsFile = () => {
+        const newName = prompt('Nuevo nombre para el archivo:', fileName.replace('.infra', ''));
+        if (newName && newName.trim()) {
+            const finalName = newName.trim().endsWith('.infra') ? newName.trim() : `${newName.trim()}.infra`;
+            setFileName(finalName);
+            const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = finalName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    };
+
     const handleClear = () => {
         setResult(null);
         setLastExecutionSuccess(null);
@@ -137,10 +154,12 @@ export function App() {
                 onNewFile={handleNewFile}
                 onOpenFile={handleOpenFile}
                 onSaveFile={handleSaveFile}
+                onSaveAsFile={handleSaveAsFile}
                 onClear={handleClear}
                 onSelectPreset={handleSelectPreset}
                 loading={loading}
                 backendStatus={backendStatus}
+                fileName={fileName}
             />
 
             {/* Contenedor Principal (Layout dividido de 2 paneles) */}

@@ -195,6 +195,77 @@ export class SemanticAnalyzer {
                 `Tipo incompatible: '${propName}' de '${resourceType}' espera '${expectedType.toString()}' pero se asignó '${actualType.toString()}'`,
                 propExpr.line, propExpr.column);
         }
+
+        // Validaciones de rango
+        if (propDef.readOnly) return;
+
+        const literalValue = this.getLiteralValue(propExpr);
+        if (literalValue === null) return;
+
+        this.validateResourcePropertyRange(resourceType, propName, literalValue, propExpr.line, propExpr.column);
+    }
+
+    getLiteralValue(expr) {
+        if (!expr) return null;
+        if (expr.constructor.name === 'LiteralExpr') {
+            return expr.value;
+        }
+        if (expr.constructor.name === 'UnaryExpr' && expr.operator === '-') {
+            const inner = this.getLiteralValue(expr.right);
+            if (typeof inner === 'number') return -inner;
+        }
+        return null;
+    }
+
+    validateResourcePropertyRange(resourceType, propName, value, line, column) {
+        const ranges = {
+            server: {
+                cpu:     { min: 1,     max: null,  msg: 'cpu debe ser > 0' },
+                memory:  { min: 1,     max: null,  msg: 'memory debe ser > 0' },
+                disk:    { min: 1,     max: null,  msg: 'disk debe ser > 0' },
+                os:      { min: 1,     max: null,  msg: 'os no puede estar vacío', isString: true },
+            },
+            service: {
+                port:     { min: 1,     max: 65535, msg: 'port debe estar en rango 1..65535' },
+                replicas: { min: 1,     max: null,  msg: 'replicas debe ser >= 1' },
+            },
+            database: {
+                engine:  { allowed: ['postgresql', 'mysql', 'sqlite'], msg: 'engine debe ser postgresql, mysql o sqlite' },
+                version: { min: 1, max: null, msg: 'version no puede estar vacío', isString: true },
+                port:    { min: 1, max: 65535, msg: 'port debe estar en rango 1..65535' },
+            },
+        };
+
+        const resourceRanges = ranges[resourceType];
+        if (!resourceRanges) return;
+
+        const range = resourceRanges[propName];
+        if (!range) return;
+
+        if (range.allowed) {
+            if (!range.allowed.includes(value)) {
+                this.error(ErrorType.SEMANTICO, 'SEM-002',
+                    `Valor inválido para '${propName}': ${range.msg}`, line, column);
+            }
+            return;
+        }
+
+        if (range.isString && (typeof value !== 'string' || value.length === 0)) {
+            this.error(ErrorType.SEMANTICO, 'SEM-002',
+                `Valor inválido para '${propName}': ${range.msg}`, line, column);
+            return;
+        }
+
+        if (typeof value !== 'number') return;
+
+        if (range.min !== null && value < range.min) {
+            this.error(ErrorType.SEMANTICO, 'SEM-002',
+                `Valor inválido para '${propName}': ${range.msg}`, line, column);
+        }
+        if (range.max !== null && value > range.max) {
+            this.error(ErrorType.SEMANTICO, 'SEM-002',
+                `Valor inválido para '${propName}': ${range.msg}`, line, column);
+        }
     }
 
     visitFunctionDeclInstruction(node) {
@@ -500,6 +571,11 @@ export class SemanticAnalyzer {
 
             case '==':
             case '!=':
+                if (!this.isEqualityCompatible(lBase, rBase)) {
+                    this.error(ErrorType.SEMANTICO, 'SEM-002',
+                        `Comparación de igualdad incompatible entre '${lBase}' y '${rBase}'`,
+                        node.line, node.column);
+                }
                 return new Type(DataType.BOOL);
 
             case '<':
@@ -525,10 +601,7 @@ export class SemanticAnalyzer {
                 if (lBase === DataType.INT && rBase === DataType.INT) {
                     return new Type(DataType.INT);
                 }
-                if (lBase === DataType.INT || rBase === DataType.INT) {
-                    return new Type(DataType.FLOAT);
-                }
-                if (lBase === DataType.FLOAT && rBase === DataType.FLOAT) {
+                if (lBase === DataType.FLOAT || rBase === DataType.FLOAT) {
                     return new Type(DataType.FLOAT);
                 }
                 if (lBase === DataType.ANY || rBase === DataType.ANY) {
@@ -541,22 +614,46 @@ export class SemanticAnalyzer {
             case '-':
             case '*':
             case '/':
-            case '%':
-                if (lBase === DataType.INT && rBase === DataType.INT) {
-                    return new Type(DataType.INT);
+                if (!['int', 'float'].includes(lBase) && lBase !== DataType.ANY) {
+                    this.error(ErrorType.SEMANTICO, 'SEM-002',
+                        `Operador '${node.operator}' requiere operandos numéricos, se obtuvo '${lBase}'`,
+                        node.left.line, node.left.column);
                 }
-                if ((lBase === DataType.INT || lBase === DataType.FLOAT) &&
-                    (rBase === DataType.INT || rBase === DataType.FLOAT)) {
+                if (!['int', 'float'].includes(rBase) && rBase !== DataType.ANY) {
+                    this.error(ErrorType.SEMANTICO, 'SEM-002',
+                        `Operador '${node.operator}' requiere operandos numéricos, se obtuvo '${rBase}'`,
+                        node.right.line, node.right.column);
+                }
+                if (lBase === DataType.FLOAT || rBase === DataType.FLOAT) {
                     return new Type(DataType.FLOAT);
                 }
-                this.error(ErrorType.SEMANTICO, 'SEM-002',
-                    `Operador '${node.operator}' solo permite operandos numéricos, se obtuvo '${lBase}' y '${rBase}'`,
-                    node.line, node.column);
-                return new Type(DataType.ANY);
+                return new Type(DataType.INT);
+
+            case '%':
+                // SOLO int % int → int
+                if (lBase !== DataType.INT && lBase !== DataType.ANY) {
+                    this.error(ErrorType.SEMANTICO, 'SEM-002',
+                        `Operador '%' requiere operando izquierdo de tipo int, se obtuvo '${lBase}'`,
+                        node.left.line, node.left.column);
+                }
+                if (rBase !== DataType.INT && rBase !== DataType.ANY) {
+                    this.error(ErrorType.SEMANTICO, 'SEM-002',
+                        `Operador '%' requiere operando derecho de tipo int, se obtuvo '${rBase}'`,
+                        node.right.line, node.right.column);
+                }
+                return new Type(DataType.INT);
 
             default:
                 return new Type(DataType.ANY);
         }
+    }
+
+    isEqualityCompatible(lBase, rBase) {
+        if (lBase === DataType.ANY || rBase === DataType.ANY) return true;
+        if (lBase === rBase) return true;
+        // números compatibles
+        if (['int', 'float'].includes(lBase) && ['int', 'float'].includes(rBase)) return true;
+        return false;
     }
 
     inferUnaryExpr(node) {
