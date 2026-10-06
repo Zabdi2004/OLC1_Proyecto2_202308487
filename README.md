@@ -6,6 +6,20 @@
 
 ---
 
+## 📊 Estado del Proyecto
+
+| Fase | Descripción | Estado |
+|------|-------------|--------|
+| FASE 1 | Analizador Léxico (Lexer) | ✅ Completado |
+| FASE 2 | Analizador Sintáctico (Parser + AST) | ✅ Completado |
+| FASE 3 | Analizador Semántico (SemanticAnalyzer) | ✅ Completado |
+| FASE 4 | Intérprete y Ejecución (Interpreter) | ✅ Completado |
+
+**Pruebas:** 65/65 pasando (12 Léxico + 18 Parser + 5 AST + 30 Semántico)  
+**Ejemplos:** 3/4 pasando (basico, intermedio, avanzado - 0 errores; errores - 1 INFRA-001 esperado)
+
+---
+
 ## 🛠️ Tecnologías y Arquitectura
 
 - **Backend:** Node.js (JavaScript ES6 Modules) + Express (API REST).
@@ -14,7 +28,7 @@
   - Analizador Sintáctico manual por Descenso Recursivo con recuperación por sincronización (`;`, `}`).
   - Árbol de Sintaxis Abstracta (AST) propio.
   - Motor de ejecución basado en el **Patrón de diseño Interpreter** (`evaluate()` y `execute()`).
-  - Tabla de símbolos con soporte de ámbitos (global, funciones, bloques) y shadowing.
+  - Tabla de símbolos con soporte de ámbito (global, funciones, bloques) y shadowing.
   - Simulador de infraestructura determinista en memoria (Server, Service, Database).
 - **Frontend:** React + Vite, Monaco Editor, Graphviz SVG (`@viz-js/viz`), Lucide React.
 
@@ -45,7 +59,6 @@ Abra en su navegador web preferido:
 ---
 
 ## 📂 Estructura del Repositorio
-
 - `backend/`: Código fuente del compilador/intérprete, AST, entorno, modelos y API REST.
 - `frontend/`: Aplicación web moderna con Monaco Editor, consola y reportes interactivos.
 - `examples/`: Casos de prueba oficiales (`basico.infra`, `intermedio.infra`, `avanzado.infra`, `errores.infra`).
