@@ -13,7 +13,7 @@ const NATIVE_FUNCTIONS = {
     connect:   { params: [DataType.RESOURCE, DataType.RESOURCE], returnType: DataType.BOOL },
     disconnect:{ params: [DataType.RESOURCE, DataType.RESOURCE], returnType: DataType.BOOL },
     print:     { params: [], variadic: true, returnType: DataType.VOID },
-    length:    { params: ['ARRAY_OR_STRING'], returnType: DataType.INT },
+    length:    { params: [DataType.ARRAY_ONLY], returnType: DataType.INT },
     status:    { params: [DataType.RESOURCE], returnType: DataType.STRING },
 };
 
@@ -61,10 +61,42 @@ export class SemanticAnalyzer {
         this.currentFunction = null;
         this.symbols = [];
         this.mainCount = 0;
+        this.pendingResourceValidations = [];
+        this.globalKnownValues = new Map();
+        this.functionReturnInfo = new Map(); // name -> { hasReturn: bool, returnType: Type }
+
+        // Primer pase: recolectar valores conocidos de variables globales con inicializador literal
+        for (const node of ast) {
+            if (node.constructor.name === 'VarDeclInstruction') {
+                this.collectGlobalKnownValue(node);
+            }
+        }
 
         this.pushScope('global');
         for (const node of ast) {
             this.visit(node);
+        }
+
+        // Post-validación: verificar restricciones de recursos con valores conocidos
+        for (const validation of this.pendingResourceValidations) {
+            this.validateResourcePropertyRange(
+                validation.resourceType,
+                validation.propName,
+                validation.propExpr,
+                validation.line,
+                validation.column
+            );
+        }
+
+        // Post-validación: funciones no-void deben tener return alcanzable
+        for (const [funcName, info] of this.functionReturnInfo) {
+            if (info.returnType && info.returnType.baseType !== 'void' && info.returnType.baseType !== 'any') {
+                if (!info.hasReturn) {
+                    this.error(ErrorType.SEMANTICO, 'SEM-002',
+                        `Función '${funcName}' tiene tipo de retorno '${info.returnType.toString()}' pero no contiene un 'return' alcanzable`,
+                        info.line, info.column);
+                }
+            }
         }
 
         if (this.mainCount === 0) {
@@ -78,6 +110,18 @@ export class SemanticAnalyzer {
 
         this.popScope();
         return { errors: this.errors, symbols: this.symbols };
+    }
+
+    collectGlobalKnownValue(node) {
+        if (node.initializer === null) return;
+        if (node.initializer.constructor.name === 'LiteralExpr') {
+            this.globalKnownValues.set(node.name, node.initializer.value);
+        } else if (node.initializer.constructor.name === 'UnaryExpr' && node.initializer.operator === '-') {
+            const inner = node.initializer.right;
+            if (inner.constructor.name === 'LiteralExpr' && typeof inner.value === 'number') {
+                this.globalKnownValues.set(node.name, -inner.value);
+            }
+        }
     }
 
     // ============================================
@@ -196,28 +240,44 @@ export class SemanticAnalyzer {
                 propExpr.line, propExpr.column);
         }
 
-        // Validaciones de rango
         if (propDef.readOnly) return;
 
-        const literalValue = this.getLiteralValue(propExpr);
-        if (literalValue === null) return;
-
-        this.validateResourcePropertyRange(resourceType, propName, literalValue, propExpr.line, propExpr.column);
+        // Validación de rango: intentar resolver inmediatamente o posponer
+        const literalValue = this.resolveValue(propExpr);
+        if (literalValue !== null) {
+            this.validateRange(resourceType, propName, literalValue, propExpr.line, propExpr.column);
+        } else if (propExpr.constructor.name === 'IdentifierExpr') {
+            // Posponer validación para variables que pueden declararse más tarde
+            this.pendingResourceValidations.push({
+                resourceType, propName, propExpr, line: propExpr.line, column: propExpr.column
+            });
+        }
     }
 
-    getLiteralValue(expr) {
+    resolveValue(expr) {
         if (!expr) return null;
         if (expr.constructor.name === 'LiteralExpr') {
             return expr.value;
         }
         if (expr.constructor.name === 'UnaryExpr' && expr.operator === '-') {
-            const inner = this.getLiteralValue(expr.right);
+            const inner = this.resolveValue(expr.right);
             if (typeof inner === 'number') return -inner;
+        }
+        if (expr.constructor.name === 'IdentifierExpr') {
+            // Buscar primero en globalKnownValues (para variables globales declaradas antes del recurso)
+            if (this.globalKnownValues.has(expr.name)) {
+                return this.globalKnownValues.get(expr.name);
+            }
+            // Luego buscar en símbolos declarados con valor conocido
+            const sym = this.lookup(expr.name);
+            if (sym && sym.knownValue !== null && sym.knownValue !== undefined) {
+                return sym.knownValue;
+            }
         }
         return null;
     }
 
-    validateResourcePropertyRange(resourceType, propName, value, line, column) {
+    validateRange(resourceType, propName, value, line, column) {
         const ranges = {
             server: {
                 cpu:     { min: 1,     max: null,  msg: 'cpu debe ser > 0' },
@@ -245,14 +305,14 @@ export class SemanticAnalyzer {
         if (range.allowed) {
             if (!range.allowed.includes(value)) {
                 this.error(ErrorType.SEMANTICO, 'SEM-002',
-                    `Valor inválido para '${propName}': ${range.msg}`, line, column);
+                    `Valor inválido para '${propName}' en ${resourceType}: ${range.msg}`, line, column);
             }
             return;
         }
 
         if (range.isString && (typeof value !== 'string' || value.length === 0)) {
             this.error(ErrorType.SEMANTICO, 'SEM-002',
-                `Valor inválido para '${propName}': ${range.msg}`, line, column);
+                `Valor inválido para '${propName}' en ${resourceType}: ${range.msg}`, line, column);
             return;
         }
 
@@ -260,11 +320,18 @@ export class SemanticAnalyzer {
 
         if (range.min !== null && value < range.min) {
             this.error(ErrorType.SEMANTICO, 'SEM-002',
-                `Valor inválido para '${propName}': ${range.msg}`, line, column);
+                `Valor inválido para '${propName}' en ${resourceType}: ${range.msg}`, line, column);
         }
         if (range.max !== null && value > range.max) {
             this.error(ErrorType.SEMANTICO, 'SEM-002',
-                `Valor inválido para '${propName}': ${range.msg}`, line, column);
+                `Valor inválido para '${propName}' en ${resourceType}: ${range.msg}`, line, column);
+        }
+    }
+
+    validateResourcePropertyRange(resourceType, propName, propExpr, line, column) {
+        const value = this.resolveValue(propExpr);
+        if (value !== null) {
+            this.validateRange(resourceType, propName, value, line, column);
         }
     }
 
@@ -282,6 +349,14 @@ export class SemanticAnalyzer {
 
         this.declare(node.name, retType, 'función', node.line, node.column, paramList);
 
+        // Inicializar info de return para validación post-análisis
+        this.functionReturnInfo.set(node.name, {
+            hasReturn: false,
+            returnType: retType,
+            line: node.line,
+            column: node.column
+        });
+
         this.pushScope(node.name);
         for (const param of node.params) {
             const pType = param.type instanceof Type ? param.type : new Type(param.type.baseType, param.type.isArray);
@@ -292,11 +367,33 @@ export class SemanticAnalyzer {
         const prevFunction = this.currentFunction;
         this.currentFunction = node.name;
 
+        // Buscar si el cuerpo contiene al menos un return statement
+        if (this.bodyHasReturn(node.body)) {
+            const info = this.functionReturnInfo.get(node.name);
+            if (info) info.hasReturn = true;
+        }
+
         this.visit(node.body);
 
         this.functionDepth--;
         this.currentFunction = prevFunction;
         this.popScope();
+    }
+
+    bodyHasReturn(body) {
+        if (!body) return false;
+        const name = body.constructor.name;
+        if (name === 'ReturnInstruction') return true;
+        if (name === 'BlockInstruction') {
+            return body.statements.some(s => this.bodyHasReturn(s));
+        }
+        if (name === 'IfInstruction') {
+            // Si ambas ramas tienen return, se considera alcanzable
+            const thenHas = this.bodyHasReturn(body.thenBranch);
+            const elseHas = body.elseBranch ? this.bodyHasReturn(body.elseBranch) : false;
+            return thenHas && elseHas;
+        }
+        return false;
     }
 
     visitTaskDeclInstruction(node) {
@@ -316,6 +413,8 @@ export class SemanticAnalyzer {
         const declared = this.declare(node.name, varType, 'variable', node.line, node.column);
         if (!declared) return;
 
+        // Rastrear valor conocido para variables con inicializador literal (útil para validaciones de rango)
+        let knownValue = null;
         if (node.initializer !== null) {
             const initType = this.inferType(node.initializer);
             if (initType && !varType.isAssignable(initType)) {
@@ -326,17 +425,32 @@ export class SemanticAnalyzer {
             if (varType.isArray) {
                 this.checkArrayHomogeneity(node.initializer, varType.baseType, node.line, node.column);
             }
+            // Guardar valor si es un literal simple
+            knownValue = this.resolveValue(node.initializer);
+        }
+
+        if (knownValue !== null) {
+            const scope = this.scopes[this.scopes.length - 1];
+            const sym = scope.symbols.get(node.name);
+            if (sym) sym.knownValue = knownValue;
         }
     }
 
     checkArrayHomogeneity(expr, expectedBaseType, line, column) {
         if (expr.constructor.name === 'ArrayExpr') {
+            const resourceTypes = [DataType.SERVER, DataType.SERVICE, DataType.DATABASE, DataType.RESOURCE];
+            const isResourceExpected = resourceTypes.includes(expectedBaseType);
             for (const elem of expr.elements) {
                 const elemType = this.inferType(elem);
-                if (elemType && !new Type(expectedBaseType).isAssignable(elemType)) {
-                    this.error(ErrorType.SEMANTICO, 'SEM-002',
-                        `Arreglo heterogéneo: elemento de tipo '${elemType.toString()}' no es compatible con '${expectedBaseType}'`,
-                        elem.line, elem.column);
+                if (elemType) {
+                    if (isResourceExpected && resourceTypes.includes(elemType.baseType)) {
+                        continue; // Válido para arreglos de recursos
+                    }
+                    if (!new Type(expectedBaseType).isStrictEqual(elemType)) {
+                        this.error(ErrorType.SEMANTICO, 'SEM-002',
+                            `Arreglo heterogéneo: elemento de tipo '${elemType.toString()}' no es exactamente compatible con '${expectedBaseType}'`,
+                            elem.line, elem.column);
+                    }
                 }
             }
         }
@@ -365,6 +479,7 @@ export class SemanticAnalyzer {
         }
 
         if (node.target.constructor.name === 'IndexExpr') {
+            const targetIndexExpr = node.target.indexExpr || node.target.index;
             const arrType = this.inferType(node.target.arrayExpr);
             if (arrType && arrType.isArray) {
                 const elemType = this.arrayElementType(arrType);
@@ -725,6 +840,18 @@ export class SemanticAnalyzer {
                 node.arrayExpr.line, node.arrayExpr.column);
             return new Type(DataType.ANY);
         }
+
+        // Validar que el índice sea estrictamente int
+        const indexExpr = node.indexExpr || node.index;
+        if (indexExpr) {
+            const indexType = this.inferType(indexExpr);
+            if (indexType && indexType.baseType !== DataType.INT && indexType.baseType !== DataType.ANY) {
+                this.error(ErrorType.SEMANTICO, 'SEM-006',
+                    `Índice de acceso debe ser de tipo int, se obtuvo '${indexType.toString()}'`,
+                    indexExpr.line, indexExpr.column);
+            }
+        }
+
         return this.arrayElementType(arrType);
     }
 
@@ -736,8 +863,10 @@ export class SemanticAnalyzer {
         const firstType = this.inferType(node.elements[0]);
         for (let i = 1; i < node.elements.length; i++) {
             const elemType = this.inferType(node.elements[i]);
-            if (elemType && firstType && !firstType.isAssignable(elemType) && !elemType.isAssignable(firstType)) {
-                this.checkArrayHomogeneity(node.elements[i], firstType.baseType, node.elements[i].line, node.elements[i].column);
+            if (elemType && firstType && !this.arrayElementsCompatible(firstType, elemType)) {
+                this.error(ErrorType.SEMANTICO, 'SEM-002',
+                    `Arreglo heterogéneo: elemento ${i + 1} de tipo '${elemType.toString()}' no es compatible con el primer elemento '${firstType.toString()}'`,
+                    node.elements[i].line, node.elements[i].column);
             }
         }
 
@@ -745,6 +874,17 @@ export class SemanticAnalyzer {
             return new Type(firstType.baseType, true);
         }
         return new Type(DataType.ANY, true);
+    }
+
+    arrayElementsCompatible(a, b) {
+        if (!a || !b) return true;
+        // resource[] puede contener server, service, database
+        const resourceTypes = [DataType.SERVER, DataType.SERVICE, DataType.DATABASE, DataType.RESOURCE];
+        if (resourceTypes.includes(a.baseType) && resourceTypes.includes(b.baseType)) {
+            return true;
+        }
+        // Para otros tipos, coincidencia estricta
+        return a.baseType === b.baseType;
     }
 
     inferCallExpr(node) {
@@ -792,10 +932,10 @@ export class SemanticAnalyzer {
             const argType = this.inferType(node.args[i]);
             const expected = sig.params[i];
 
-            if (expected === 'ARRAY_OR_STRING') {
-                if (argType && !argType.isArray && argType.baseType !== DataType.STRING && argType.baseType !== DataType.ANY) {
+if (expected === DataType.ARRAY_ONLY) {
+                if (argType && !argType.isArray && argType.baseType !== DataType.ANY) {
                     this.error(ErrorType.SEMANTICO, 'SEM-007',
-                        `Argumento ${i + 1} de '${node.callee}' debe ser un arreglo o string, se obtuvo '${argType.toString()}'`,
+                        `Argumento ${i + 1} de '${node.callee}' debe ser un arreglo, se obtuvo '${argType.toString()}'`,
                         node.args[i].line, node.args[i].column);
                 }
             } else if (argType) {

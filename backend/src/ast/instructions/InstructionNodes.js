@@ -388,7 +388,7 @@ export class FunctionDeclInstruction extends Instruction {
         this.returnType = returnType;
         this.body = body;
         this.callDepth = 0;
-        this.maxRecursionDepth = 1000; // Sección 8.3
+        this.maxRecursionDepth = 1000; // Sección 8.3 - valor por defecto
     }
 
     execute(environment) {
@@ -399,6 +399,11 @@ export class FunctionDeclInstruction extends Instruction {
             err.line = this.line;
             err.column = this.column;
             throw err;
+        }
+
+        // Permitir configuración del límite de recursividad desde el entorno
+        if (environment.maxRecursionDepth !== undefined) {
+            this.maxRecursionDepth = environment.maxRecursionDepth;
         }
 
         this.declarationEnvironment = environment;

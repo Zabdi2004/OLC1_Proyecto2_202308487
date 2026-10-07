@@ -12,7 +12,8 @@ export const DataType = Object.freeze({
     RESOURCE: 'resource', // Tipo polimórfico genérico que acepta server, service o database
     VOID: 'void',
     NULL: 'null',
-    ANY: 'any'
+    ANY: 'any',
+    ARRAY_ONLY: '_array_only' // Tipo interno para length() que requiere solo arreglos
 });
 
 export class Type {
@@ -55,21 +56,22 @@ export class Type {
 
     /**
      * Valida si un valor 'fromType' puede ser asignado a una variable de este tipo (Sección 26.6)
+     * NOTA: Para arreglos, la coincidencia es estricta (no hay widening int→float).
      */
     isAssignable(fromType) {
         if (!fromType) return false;
         if (this.isArray !== fromType.isArray) return false;
 
-        // Arreglos deben ser del mismo tipo base
+        // Arreglos: coincidencia estricta de tipo base (sin widening)
         if (this.isArray) {
-            if (this.baseType === DataType.RESOURCE && 
+            if (this.baseType === DataType.RESOURCE &&
                 (fromType.baseType === DataType.SERVER || fromType.baseType === DataType.SERVICE || fromType.baseType === DataType.DATABASE || fromType.baseType === DataType.RESOURCE)) {
                 return true;
             }
             return this.baseType === fromType.baseType;
         }
 
-        // Caso float: acepta int o float (Sección 26.6)
+        // Caso float: acepta int o float (Sección 26.6) - solo para valores individuales
         if (this.baseType === DataType.FLOAT && (fromType.baseType === DataType.INT || fromType.baseType === DataType.FLOAT)) {
             return true;
         }
@@ -82,5 +84,14 @@ export class Type {
 
         // Tipos idénticos
         return this.baseType === fromType.baseType;
+    }
+
+    /**
+     * Verifica si dos tipos son estrictamente iguales (para homogeneidad de arreglos).
+     * No permite widening int→float.
+     */
+    isStrictEqual(other) {
+        if (!other) return false;
+        return this.baseType === other.baseType && this.isArray === other.isArray;
     }
 }

@@ -400,8 +400,7 @@ export class CallExpr extends Expression {
                 if (evaluatedArgs.length !== 1) throw new Error(`length() requiere 1 argumento`);
                 const target = evaluatedArgs[0];
                 if (Array.isArray(target)) return target.length;
-                if (typeof target === 'string') return target.length;
-                throw new Error(`length() solo es aplicable a arreglos o strings`);
+                throw new Error(`length() solo es aplicable a arreglos`);
 
             case 'status':
                 if (evaluatedArgs.length !== 1) throw new Error(`status() requiere 1 argumento`);

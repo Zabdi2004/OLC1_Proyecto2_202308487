@@ -10,9 +10,11 @@ import { resetInstructionCounter } from '../ast/instructions/InstructionNodes.js
 import { Type } from '../environment/Type.js';
 
 export class Interpreter {
-    constructor() {
+    constructor(options = {}) {
         this.dotGenerator = new AstGraphvizReport();
         this.semanticAnalyzer = new SemanticAnalyzer();
+        this.maxRecursionDepth = options.maxRecursionDepth || 1000;
+        this.maxInstructionLimit = options.maxInstructionLimit || 100000;
     }
 
     /**
@@ -105,6 +107,10 @@ export class Interpreter {
 
         // 4. EJECUCIÓN (PATRÓN INTERPRETER)
         try {
+            // Configurar límites en el entorno global
+            globalEnv.maxRecursionDepth = this.maxRecursionDepth;
+            globalEnv.maxInstructionLimit = this.maxInstructionLimit;
+
             // Paso A: Registrar recursos, funciones, tareas y variables globales
             let mainTask = null;
 

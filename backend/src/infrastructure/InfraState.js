@@ -58,11 +58,23 @@ export class InfraState {
     /**
      * start(resource): Cambia stopped -> running
      * start sobre un recurso ya activo no deberá duplicar efectos; retornará false y registrará advertencia.
+     * Los services NO pueden iniciarse directamente; deben usarse deploy().
      */
     start(resource) {
         if (!resource) return false;
         if (resource.status === 'running') {
             this.bitacora.push(`[WARN] Resource '${resource.name}' is already running`);
+            return false;
+        }
+        // Los services no pueden iniciarse con start(); solo servers y databases pueden ir de stopped a running
+        if (resource.constructor.name === 'ServiceResource' || resource.status === 'undeployed') {
+            const err = new Error(`No se puede iniciar '${resource.name}': los servicios deben desplegarse con deploy()`);
+            err.code = 'INFRA-001';
+            err.line = 0;
+            err.column = 0;
+            throw err;
+        }
+        if (resource.status !== 'stopped') {
             return false;
         }
 
